@@ -101,7 +101,7 @@ def generate_ppt(user_inputs):
     st.json(user_inputs)  # Show the exact JSON request
 
     try:
-        response = requests.post("http://51.20.231.154:8000/generate_ppt", json=user_inputs, timeout=10)
+        response = requests.post("http://51.20.231.154:8000/generate_ppt", json=user_inputs, timeout=1000)
         response.raise_for_status()  # Raises an error for bad responses (4xx, 5xx)
         
         if response.status_code == 200:
