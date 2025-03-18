@@ -190,5 +190,3 @@ Traceback (most recent call last):
     from backend.format_ppt import apply_formatting  # Import formatting function
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ModuleNotFoundError: No module named 'backend'
-INFO:     Stopping reloader process [26852]
-INFO:     Stopping reloader process [27237]
