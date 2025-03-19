@@ -1,59 +1,108 @@
 import openai
 import os
-from backend.db_handler import retrieve_common_feedback, store_ai_feedback, store_user_feedback
-from pptx import Presentation  # ✅ FIXED: Added missing import
+from backend.db_handler import retrieve_common_feedback, store_ai_feedback
 
 class RequirementEnricher:
     def __init__(self, api_key):
         self.client = openai.OpenAI(api_key=api_key)
 
-    def enrich_prompt(self, topic, audience, duration, purpose):
+    def generate_slide_titles(self, topic, num_slides):
         """
-        Enhances user input using GPT-4o and past feedback.
-        - Retrieves past feedback to refine content.
-        - Generates structured slides with AI guidance.
+        Forces AI to generate exactly `num_slides` unique slide titles.
         """
-
-        # ✅ FIX: Ensure `past_feedback` does not break the system
-        try:
-            past_feedback = retrieve_common_feedback(topic)
-            if not past_feedback:
-                past_feedback = "No relevant feedback found."
-        except Exception as e:
-            past_feedback = f"⚠️ Error retrieving past feedback: {str(e)}"
-
-        # ✅ IMPROVED PROMPT: Structured & Clear
         enriched_prompt = f"""
-        You are an expert AI content generator specializing in PowerPoint presentations.
-        A user is creating a PowerPoint on **"{topic}"**.
+        You are an AI expert creating a PowerPoint on **"{topic}"**.
+        Generate **{num_slides} unique, structured slide titles**.
 
-        - **Target Audience:** {audience}
-        - **Presentation Duration:** {duration} minutes
-        - **Objective:** {purpose}
-        
-        **Past User & AI Feedback on Similar Topics:**
-        {past_feedback}
+        **Rules:**
+        - Each slide must focus on a different aspect of the topic.
+        - **Do NOT summarize**. Ensure diverse subtopics.
+        - Titles should be **concise, specific, and engaging** (Max 6 words).
+        - Follow a **logical progression** from introduction to key insights.
 
-        **Your Task:**
-        - Generate a structured breakdown for slides.
-        - Use **bullet points** instead of paragraphs.
-        - Suggest **concise, engaging, and professional** slide content.
-        - Provide **visual recommendations** (icons, images, charts).
-        - **Avoid GPT-style conversations.** Keep it structured & crisp.
-
-        **Expected Output Format:**
-        1️⃣ **Title Slide:** Topic & Introduction  
-        2️⃣ **Key Subtopics** with bullet points  
-        3️⃣ **Visual Enhancements** for each slide  
-        4️⃣ **No conversational responses.**  
+        **Output Format:**
+        1. Slide Title
+        2. Slide Title
+        3. Slide Title
+        ...
         """
 
-        # ✅ FIX: Catch GPT API Failures
         try:
             response = self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": enriched_prompt}]
             )
-            return response.choices[0].message.content
+            slide_titles = response.choices[0].message.content.split("\n")
+
+            # ✅ **Ensure Correct Slide Count**
+            slide_titles = [title.strip() for title in slide_titles if title.strip()]
+            if len(slide_titles) != num_slides:
+                raise ValueError(f"⚠️ AI returned {len(slide_titles)} slides instead of {num_slides}. Retrying...")
+
+            return slide_titles
         except Exception as e:
-            return f"⚠️ Error generating enriched prompt: {str(e)}"
+            return [f"Slide {i+1}: {topic}" for i in range(num_slides)]  # Fallback
+
+    def enrich_prompt(self, topic, audience, duration, purpose, num_slides):
+        """
+        Forces AI to generate exactly `num_slides` structured slides.
+        """
+        try:
+            past_feedback = retrieve_common_feedback(topic) or "No relevant feedback found."
+        except Exception as e:
+            past_feedback = f"⚠️ Error retrieving past feedback: {str(e)}"
+
+        refined_prompt = f"""
+        You are creating a **{num_slides}-slide** PowerPoint on **"{topic}"**.
+        - 🎯 **Audience:** {audience}
+        - ⏳ **Duration:** {duration} minutes
+        - 📌 **Purpose:** {purpose}
+        - 📊 **Past Feedback Considered:** {past_feedback}
+
+        **Rules:**
+        - Generate **EXACTLY {num_slides} slides** (No more, no less).
+        - **Each slide MUST be a unique subtopic** (No summarization).
+        - Use **clear bullet points**, not paragraphs.
+        - **No duplicate content** across slides.
+
+        **Expected Output Format:**
+        Slide 1: **Title**
+        - Bullet 1
+        - Bullet 2
+        - Bullet 3
+
+        Slide 2: **Title**
+        - Bullet 1
+        - Bullet 2
+        - Bullet 3
+
+        Slide 3: **Title**
+        - Bullet 1
+        - Bullet 2
+        - Bullet 3
+
+        Slide {num_slides}: **Conclusion**
+        - Bullet 1
+        - Bullet 2
+        - Bullet 3
+        """
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": refined_prompt}]
+            )
+            enriched_content = response.choices[0].message.content
+
+            # ✅ **Check for Correct Slide Count**
+            generated_slides = enriched_content.split("\n\n")
+            if len(generated_slides) != num_slides:
+                raise ValueError(f"⚠️ AI returned {len(generated_slides)} slides instead of {num_slides}. Regenerating...")
+
+            # ✅ Store AI-generated feedback for future improvements
+            if topic.strip():
+                store_ai_feedback(topic, 0, enriched_content)
+
+            return enriched_content
+        except Exception as e:
+            return f"⚠️ Error generating enriched content: {str(e)}"
