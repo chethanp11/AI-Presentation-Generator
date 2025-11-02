@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+
 import openai
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -17,8 +19,9 @@ def home():
     return {"message": "AI Presentation Generator is Running!"}
 
 # ------------------------- 📁 File Paths -------------------------
-OUTPUT_DIR = "/home/ubuntu/AI-Presentation-Generator/output"
-os.makedirs(OUTPUT_DIR, exist_ok=True)  
+BASE_DIR = Path(__file__).resolve().parents[1]
+OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ------------------------- 🤖 Load OpenAI API Key -------------------------
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -27,6 +30,12 @@ if not openai_api_key:
 
 client = openai.OpenAI(api_key=openai_api_key)
 enricher = RequirementEnricher(api_key=openai_api_key)
+
+SYSTEM_PROMPT = (
+    "You are an expert presentation writer who creates concise, bulleted slide content. "
+    "Respond only with the body copy for the slide. Do not include slide numbers, titles, "
+    "or any assistant preamble or postscript."
+)
 
 # ------------------------- 📄 Request Model -------------------------
 class PresentationRequest(BaseModel):
@@ -47,10 +56,10 @@ def generate_ppt(request: PresentationRequest):
         print(f"🟢 Generating PPT for topic: {request.topic} | Slides: {request.num_slides}")
 
         filename = f"{request.topic.replace(' ', '_')}_presentation.pptx"
-        file_path = os.path.join(OUTPUT_DIR, filename)
+        file_path = OUTPUT_DIR / filename
 
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        if file_path.exists():
+            file_path.unlink()
 
         prs = Presentation()
 
@@ -71,25 +80,39 @@ def generate_ppt(request: PresentationRequest):
             for i in range(request.num_slides)
         ]
 
-        try:
-            response = client.chat.completions.create(model="gpt-4o", messages=slides_prompts)
-            slide_contents = [choice.message.content for choice in response.choices]
-
-            # ✅ Ensure Slide Content Matches Requested Count
-            if len(slide_contents) < request.num_slides:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"⚠️ AI returned {len(slide_contents)} slides instead of {request.num_slides}. Please retry."
+        slide_contents = []
+        for idx, user_prompt in enumerate(slides_prompts):
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        user_prompt,
+                    ],
                 )
+                content = response.choices[0].message.content.strip()
+                if not content:
+                    raise ValueError(f"Empty response for slide {idx + 1}.")
+                slide_contents.append(content)
+            except Exception as api_error:
+                raise HTTPException(status_code=500, detail=f"❌ GPT API Error: {str(api_error)}") from api_error
 
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"❌ GPT API Error: {str(e)}")
+        # ✅ Ensure Slide Content Matches Requested Count
+        if len(slide_contents) != request.num_slides:
+            raise HTTPException(
+                status_code=500,
+                detail=f"⚠️ AI returned {len(slide_contents)} slides instead of {request.num_slides}. Please retry."
+            )
 
         # ✅ Generate Slides with AI-Formatted Content
         for i, slide_content in enumerate(slide_contents):
             slide = prs.slides.add_slide(prs.slide_layouts[5])
-            title = slide.shapes.title
-            title.text = enriched_titles[i]
+            title_shape = slide.shapes.title
+            if title_shape:
+                title_shape.text = enriched_titles[i]
+            else:
+                title_box = slide.shapes.add_textbox(Inches(1), Inches(0.3), Inches(8), Inches(1))
+                title_box.text_frame.text = enriched_titles[i]
 
             left, top, width, height = Inches(1), Inches(1.5), Inches(8), Inches(4)
             text_box = slide.shapes.add_textbox(left, top, width, height)
@@ -112,7 +135,7 @@ def generate_ppt(request: PresentationRequest):
         }
         apply_formatting(prs, user_preferences)
 
-        prs.save(file_path)
+        prs.save(str(file_path))
         print(f"✅ Presentation saved successfully: {file_path}")
 
         return {"message": "✅ Presentation created successfully", "file": filename}
@@ -126,12 +149,12 @@ def generate_ppt(request: PresentationRequest):
 @app.get("/preview_ppt/{filename}")
 def preview_ppt(filename: str):
     """Returns the text content of the generated PPT for quick review & improvement."""
-    file_path = os.path.join(OUTPUT_DIR, filename)
+    file_path = OUTPUT_DIR / filename
     
-    if not os.path.exists(file_path):
+    if not file_path.exists():
         raise HTTPException(status_code=404, detail="❌ File not found")
 
-    ppt = Presentation(file_path)
+    ppt = Presentation(str(file_path))
     preview = []
     for i, slide in enumerate(ppt.slides):
         text = "\n".join(shape.text for shape in slide.shapes if shape.has_text_frame)
@@ -143,11 +166,11 @@ def preview_ppt(filename: str):
 # ------------------------- 📥 Download PPT -------------------------
 @app.get("/download_ppt/{filename}")
 def download_ppt(filename: str):
-    file_path = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(file_path):
+    file_path = OUTPUT_DIR / filename
+    if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"❌ File '{filename}' not found.")
     
-    return FileResponse(file_path, media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", filename=filename)
+    return FileResponse(str(file_path), media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", filename=filename)
 
 # ------------------------- 🏁 Start API -------------------------
 if __name__ == "__main__":

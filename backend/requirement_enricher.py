@@ -1,5 +1,6 @@
 import openai
-import os
+import re
+
 from backend.db_handler import retrieve_common_feedback, store_ai_feedback
 
 class RequirementEnricher:
@@ -32,14 +33,22 @@ class RequirementEnricher:
                 model="gpt-4o",
                 messages=[{"role": "user", "content": enriched_prompt}]
             )
-            slide_titles = response.choices[0].message.content.split("\n")
+            slide_titles_raw = response.choices[0].message.content.split("\n")
 
             # ✅ **Ensure Correct Slide Count**
-            slide_titles = [title.strip() for title in slide_titles if title.strip()]
-            if len(slide_titles) != num_slides:
+            slide_titles = []
+            for title in slide_titles_raw:
+                cleaned = title.strip()
+                if not cleaned:
+                    continue
+                cleaned = re.sub(r"^\d+[\).\s-]*", "", cleaned).strip()
+                if cleaned:
+                    slide_titles.append(cleaned)
+
+            if len(slide_titles) < num_slides:
                 raise ValueError(f"⚠️ AI returned {len(slide_titles)} slides instead of {num_slides}. Retrying...")
 
-            return slide_titles
+            return slide_titles[:num_slides]
         except Exception as e:
             return [f"Slide {i+1}: {topic}" for i in range(num_slides)]  # Fallback
 
@@ -48,7 +57,11 @@ class RequirementEnricher:
         Forces AI to generate exactly `num_slides` structured slides.
         """
         try:
-            past_feedback = retrieve_common_feedback(topic) or "No relevant feedback found."
+            past_feedback_entries = retrieve_common_feedback(topic)
+            if past_feedback_entries:
+                past_feedback = "; ".join(past_feedback_entries)
+            else:
+                past_feedback = "No relevant feedback found."
         except Exception as e:
             past_feedback = f"⚠️ Error retrieving past feedback: {str(e)}"
 

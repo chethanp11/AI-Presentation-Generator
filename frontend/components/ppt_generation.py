@@ -1,11 +1,16 @@
-import streamlit as st
 import requests
+import streamlit as st
+
+from frontend.utils.api_handler import get_backend_base_url
 
 def generate_ppt(user_inputs):
     st.subheader("🛠️ Generating AI-Powered Presentation...")
 
+    base_url = get_backend_base_url()
+    endpoint = f"{base_url}/generate_ppt"
+
     try:
-        response = requests.post("http://51.20.231.154:8000/generate_ppt", json=user_inputs, timeout=1000)
+        response = requests.post(endpoint, json=user_inputs, timeout=1000)
         response.raise_for_status()
 
         if response.status_code == 200:

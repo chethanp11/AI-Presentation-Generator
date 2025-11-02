@@ -1,9 +1,10 @@
 import sqlite3
-import os
+from pathlib import Path
 
 # ---------------------- 📂 DATABASE CONFIGURATION ----------------------
-DB_PATH = "/home/ubuntu/AI-Presentation-Generator/database/feedback.db"
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # Ensure DB directory exists
+BASE_DIR = Path(__file__).resolve().parents[1]
+DB_PATH = BASE_DIR / "database" / "feedback.db"
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)  # Ensure DB directory exists
 
 # ---------------------- 🏗️ DATABASE INITIALIZATION ----------------------
 def initialize_db():

@@ -1,8 +1,9 @@
-from pptx import Presentation
-from pptx.util import Pt, Inches
-from pptx.enum.text import PP_ALIGN
-from pptx.dml.color import RGBColor
 import re
+
+from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
+from pptx.util import Inches, Pt
 
 # ---------------------- 🎨 DEFAULT DESIGN CONFIGURATIONS ----------------------
 DEFAULT_USER_PREFERENCES = {
@@ -54,8 +55,6 @@ def format_text_elements(slide, font_choice, header_color, content_color):
     - Summarizes long text to make it concise.
     - Ensures text fits properly within slide.
     """
-    title_shape = slide.shapes.title
-
     for shape in slide.shapes:
         if shape.has_text_frame:
             text_frame = shape.text_frame
@@ -63,13 +62,17 @@ def format_text_elements(slide, font_choice, header_color, content_color):
             for paragraph in text_frame.paragraphs:
                 cleaned_text = clean_slide_text(paragraph.text)
                 cleaned_text = summarize_text_if_needed(cleaned_text)  # ✅ AI Summarization
-                paragraph.text = cleaned_text
+                cleaned_text = apply_smart_bulleting(cleaned_text)
+
+                if paragraph.text != cleaned_text:
+                    paragraph.text = cleaned_text
+
+                paragraph.alignment = PP_ALIGN.CENTER if shape == slide.shapes.title else PP_ALIGN.LEFT
 
                 for run in paragraph.runs:
                     run.font.name = font_choice
                     run.font.size = Pt(32) if shape == slide.shapes.title else Pt(22)
                     run.font.color.rgb = header_color if shape == slide.shapes.title else content_color
-                    paragraph.alignment = PP_ALIGN.CENTER if shape == slide.shapes.title else PP_ALIGN.LEFT
 
                     # ✅ AI-driven Sub-header Formatting
                     if is_subheader(paragraph.text):
@@ -77,11 +80,8 @@ def format_text_elements(slide, font_choice, header_color, content_color):
                         run.font.italic = True  # Emphasize sub-headers
                         run.font.underline = True
 
-                    # ✅ AI-driven Smart Bulleting
-                    paragraph.text = apply_smart_bulleting(paragraph.text)
-
             # ✅ Fix text overflow
-            ensure_text_fits(shape, text_frame)
+            ensure_text_fits(shape, text_frame, font_choice)
 
 
 # ---------------------- 🔎 AI DETECTION: IS SUBHEADER? ----------------------
@@ -102,6 +102,8 @@ def apply_smart_bulleting(text):
     - Ensures key points are properly indented.
     """
     text = text.strip()
+    if not text:
+        return text
     if text.startswith("-") or text.startswith("•") or text.startswith("Numbers"):
         return text  # Already formatted
 
@@ -135,16 +137,21 @@ def summarize_text_if_needed(text):
 
 
 # ---------------------- ✂️ FIX TEXT OVERFLOW ----------------------
-def ensure_text_fits(shape, text_frame):
+def ensure_text_fits(shape, text_frame, font_choice):
     """Ensures text fits inside the shape by dynamically reducing font size."""
-    max_width = shape.width - Inches(0.5)
-    max_height = shape.height - Inches(0.5)
+    try:
+        # Let python-pptx balance the text size automatically when available.
+        text_frame.fit_text(font_family=font_choice, max_size=24, bold=None, italic=None)
+        return
+    except (AttributeError, TypeError):
+        # Fall back to a simple heuristic if fit_text is unavailable.
+        pass
 
     for paragraph in text_frame.paragraphs:
+        text_length = len(paragraph.text.strip())
         for run in paragraph.runs:
-            text_size = run.font.size or Pt(20)
-            while shape.width > max_width or shape.height > max_height:
-                text_size -= Pt(2)
-                run.font.size = text_size
-                if text_size < Pt(14):
-                    break
+            current_size = run.font.size or Pt(22)
+            if text_length > 300 and current_size > Pt(16):
+                run.font.size = Pt(16)
+            if text_length > 500:
+                run.font.size = Pt(14)
